@@ -1,207 +1,190 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import datetime
-
-#parsing
-df = pd.read_csv('/content/sysmon.csv', parse_dates=["Timestamp"])
-df = df.sort_values("Timestamp")
-
-E_PROC, E_NET, E_OK, E_FAIL, E_LOGOFF = 1, 3, 4624, 4625, 4634
-
-print(f"Loaded {len(df)} events")
-print(f"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}")
-print(f"Event types: {sorted(df['EventID'].unique())}")
-print(f"Users: {sorted(df['User'].unique())}")
-print("\nFirst few rows:")
-print(df.head())
-
-#visualization 
+H2. source="log new1.csv" sourcetype="csv"  
+| rex field=_raw max_match=0 "Account Name:\s*(?<users>\S+)"   
+| eval user = mvfilter(users!="-")   
+| where 'Event ID'="4624" 
+| search user IN ("C3570", "C6279","20pa01-05")
+| eval _time = strptime("Date and Time", "%m/%d/%Y %H:%M")
 
 
-# HEATMAP - User activity by hour
-print("Creating heatmap...")
-heatmap_data = df.pivot_table(index='User', columns=df['Timestamp'].dt.hour, values='EventID', aggfunc='count', fill_value=0)
-
-# Plot heatmap
-plt.figure(figsize=(12, 6))
-sns.heatmap(heatmap_data, cmap='Reds', annot=True, fmt='d')
-plt.title('User Activity Heatmap by Hour')
-plt.xlabel('Hour of Day')
-plt.ylabel('User')
-plt.show()
-
-# BOX PLOT - Time intervals between events
-print("Creating box plot...")
-plt.figure(figsize=(10, 6))
-interval_data = []
-event_labels = []
-
-for event_id in sorted(df['EventID'].unique()):
-    event_times = df[df['EventID'] == event_id]['Timestamp'].sort_values()
-    if len(event_times) > 1:
-        intervals = event_times.diff().dt.total_seconds() / 60  # Convert to minutes
-        intervals = intervals.dropna()
-        if len(intervals) > 0:
-            interval_data.append(intervals)
-            event_labels.append(f'Event {event_id}')
-
-if interval_data:
-    plt.boxplot(interval_data, tick_labels=event_labels)
-    plt.title('Time Intervals Between Events')
-    plt.xlabel('Event Type')
-    plt.ylabel('Interval (Minutes)')
-    plt.yscale('log')
-    plt.grid(True, alpha=0.3)
-plt.tight_layout()
-
-# SPARKLINES - All users activity over time in single graph
-print("Creating sparklines...")
-plt.figure(figsize=(14, 8))
-
-users = df['User'].unique()
-colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-
-for i, user in enumerate(users):
-    user_data = df[df['User'] == user].set_index('Timestamp')
-    hourly_counts = user_data.resample('h').size()
-
-    color = colors[i % len(colors)]  # Cycle through colors if more users than colors
-    plt.plot(hourly_counts.index, hourly_counts.values,
-             color=color, linewidth=2, label=f'{user}', marker='o', markersize=3)
-
-plt.title('User Activity Sparklines - All Users Comparison', fontsize=16)
-plt.xlabel('Time')
-plt.ylabel('Events per Hour')
-plt.legend(bbox_to_anchor=(1, 1), loc='upper left')
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
-
-#user level - event id
+H3. source="log new1.csv" sourcetype="csv"  
+| rex field=_raw max_match=0 "Account Name:\s*(?<users>\S+)"   
+| eval user = mvfilter(users!="-")   
+| where 'Event ID'="4625"
+| stats count as failed_attempts by user
+| where failed_attempts > 4
+| table user, failed_attempts
 
 
-df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+H4. source="log new1.csv" sourcetype="csv"  
+| rex field=_raw max_match=0 "Account Name:\s*(?<users>\S+)"   
+| eval user = mvfilter(users!="-")   
+| rex field=message "Logon ID:\s*(?<LogonID>\S+)"
+| where ('Event ID'="4624" OR 'Event ID'="4634" OR 'Event ID'="4647")
+| sort _time
+| transaction LogonID maxspan=1h keepevicted=true startswith=('Event ID'="4624") endswith=('Event ID'="4634" OR 'Event ID'="4647")
+| where duration < 600
+| table _time, user, LogonID, duration, 'Event ID'
 
-unique_eventids = sorted(df["EventID"].unique())
-eventid_map = {eid: idx for idx, eid in enumerate(unique_eventids)}
-df["EventID_mapped"] = df["EventID"].map(eventid_map)
-
-users = df["User"].unique()
-for user in users:
-    user_df = df[df["User"] == user]
-    plt.figure(figsize=(10, 2))  # sparkline style
-    plt.plot(user_df["Timestamp"], user_df["EventID_mapped"], linewidth=1, marker="o", markersize=3)
-    plt.yticks(range(len(unique_eventids)), unique_eventids, fontsize=6)  # show actual EventIDs on y-axis
-    plt.title(f"User: {user}", fontsize=8, loc="left")
-    plt.tight_layout()
-    plt.show()
-
-#manipulation- all 4
-MIN_FAILED_ATTEMPTS = 4  
-TIME_WINDOW_HOURS = 200   
-
-# --- 1. Multiple failed login attempts followed by a successful login ---
-print(f"--- Multiple Failed Logins Followed by a Successful Login ---")
-print(f"(Detecting >= {MIN_FAILED_ATTEMPTS} failures within a {TIME_WINDOW_HOURS}-hour window of a success)")
-print("-" * 70)
+H6. source="log new1.csv" sourcetype="csv"  
+| rex field=_raw max_match=0 "Account Name:\s*(?<users>\S+)"   
+| eval user = mvfilter(users!="-")   
+| where 'Event ID'="4624"
+| eval day_of_week = strftime(_time, "%w")
+| eval hour_of_day = strftime(_time, "%H")
+| where (day_of_week=0 OR day_of_week=6) 
+    OR (day_of_week>=1 AND day_of_week<=5 AND (hour_of_day < 8 OR hour_of_day >= 11))
+| table _time, user, 'Event ID', day_of_week, hour_of_day, "Date and Time"
 
 
-failed_login_timestamps = {}
-found_suspicious_login = False
-for index, row in df.iterrows():
-    user = row['User']
-    event_type = row['EventType']
-    timestamp = row['Timestamp']
 
-    if user not in failed_login_timestamps:
-        failed_login_timestamps[user] = []
+h1.source="log new1.csv" sourcetype="csv"   
+| rex field=_raw max_match=0 "Account Name:\s*(?<users>\S+)"   
+| eval user = mvfilter(users!="-")
+| rex field=_raw "Source Network Address:\s*(?<IpAddress>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+| where 'Event ID'="4624" OR 'Event ID'="4625"
+| sort _time
+| streamstats window=10 count(eval('Event ID'="4625")) as recent_failed_attempts by user
+| where recent_failed_attempts > 2 AND 'Event ID'="4624"
 
-    if event_type == 'LoginFailure':
-        failed_login_timestamps[user].append(timestamp)
-
-    elif event_type == 'LoginSuccess':
-        time_window = datetime.timedelta(hours=TIME_WINDOW_HOURS)
-
-        recent_failures = [
-            t for t in failed_login_timestamps[user] if timestamp - t <= time_window
-        ]
-
-        if len(recent_failures) >= MIN_FAILED_ATTEMPTS:
-            found_suspicious_login = True
-            print(f"Suspicious login for user '{user}': {len(recent_failures)} failed attempts followed by a success.")
-            print(f"  Successful login at: {timestamp}")
-            print(f"  Preceding failed attempts within the {TIME_WINDOW_HOURS}-hour window:")
-            for failure_time in recent_failures:
-                print(f"    - {failure_time}")
-            print("\n")
-
-        # A successful login breaks the chain of failures, so reset the list for this user.
-        failed_login_timestamps[user] = []
-
-if not found_suspicious_login:
-    print("No instances found matching the specified criteria.")
-    print("Consider adjusting MIN_FAILED_ATTEMPTS or TIME_WINDOW_HOURS if you expect to see results.")
-print("-" * 70)
-
-# --- 2. Suspicious process launch: powershell with encoded commands or mimikatz.exe ---
-print("--- Suspicious Process Launches (powershell with encoded commands or mimikatz.exe) ---")
-suspicious_processes = df[
-    (df['Image'].str.contains('mimikatz.exe', case=False, na=False)) |
-    (df['CommandLine'].str.contains('powershell.exe -enc', case=False, na=False)) |
-    (df['CommandLine'].str.contains('mimikatz.exe', case=False, na=False)) |
-    (df['CommandLine'].str.contains('Invoke-WebRequest http://malicious.com', na=False))
-]
-
-if not suspicious_processes.empty:
-    for index, row in suspicious_processes.iterrows():
-        print(f"Timestamp: {row['Timestamp']}, User: {row['User']}, Image: {row['Image']}, CommandLine: {row['CommandLine']}")
-else:
-    print("No suspicious process launches found.")
-print("-" * 70)
-
-# --- 3. Network connection to rare/malicious IPs multiple times from the same user ---
-print("--- Multiple Network Connections to the Same IP by a User ---")
-network_connections = df[df['EventType'] == 'NetworkConnect']
-connection_counts = network_connections.groupby(['User', 'DestinationIp']).size().reset_index(name='Count')
-
-suspicious_connections = connection_counts[connection_counts['Count'] > 1]
-
-if not suspicious_connections.empty:
-    for index, row in suspicious_connections.iterrows():
-        print(f"User '{row['User']}' connected to IP '{row['DestinationIp']}' {row['Count']} times.")
-else:
-    print("No users found making multiple connections to the same IP.")
-print("-" * 70)
-
-# Fourth one ----------------------------------------------------------------------------------------
-print("--- Short Login-Logout Sessions (< 10 minutes) ---")
-user_sessions = {}
-for index, row in df.iterrows():
-    user = row['User']
-    event_type = row['EventType']
-    timestamp = row['Timestamp']
-
-    if user not in user_sessions:
-        user_sessions[user] = {'login_time': None}
-
-    if event_type == 'LoginSuccess':
-        user_sessions[user]['login_time'] = timestamp
-    elif event_type == 'Logout':
-        if user_sessions[user]['login_time']:
-            session_duration = timestamp - user_sessions[user]['login_time']
-            if session_duration.total_seconds() / 60 < 10:
-                print(f"User '{user}' had a short session of {session_duration}")
-        user_sessions[user]['login_time'] = None
-print("-" * 70)
+------------ca1--------------
 
 
-plt.show()
+Count Connections by User (stats)
+source="network_data.csv" 
+| stats count as Connection_Count by User
+| sort -Connection_Count
 
-# Also create a summary of total activity per user //optional - to see last - for spark lines
-print("\nUser Activity Summary:")
-user_activity = df['User'].value_counts().sort_values(ascending=False)
-for user, count in user_activity.items():
-    print(f"  {user}: {count} total events")
-print(f"\nMost active user: {user_activity.index[0]} ({user_activity.iloc[0]} events)")
-print(f"Least active user: {user_activity.index[-1]} ({user_activity.iloc[-1]} events)")
+Total Packet Size by Destination IP (stats)
+source="network_data.csv" 
+| stats sum(packet_size) as Total_Packet_Size by dest_ip
+| sort -Total_Packet_Size
+
+Average Packet Size by User and Destination IP (stats)
+source="network_data.csv"
+| stats avg(packet_size) as Avg_Packet_Size by User, dest_ip
+| eval Avg_Packet_Size=round(Avg_Packet_Size, 2)
+| sort User, dest_ip
+
+Add Total Connections to Each Event (eventstats)
+source="network_data.csv"
+| eventstats count as Total_User_Connections by User
+| table User, client_ip, dest_ip, packet_size, Total_User_Connections
+| sort User, Timestamp
+
+Connections Over Time by Destination IP (timechart)
+source="network_data.csv" 
+| eval _time=strptime(Timestamp, "%m/%d/%Y %H:%M")
+| timechart span=1d count by dest_ip
+
+
+Overall Packet Size Variation
+source="network_data.csv" 
+| stats min(packet_size) as Min_Size, max(packet_size) as Max_Size, avg(packet_size) as Avg_Size, stdev(packet_size) as Std_Dev_Size
+| eval Range=Max_Size - Min_Size
+| eval Avg_Size=round(Avg_Size, 2), Std_Dev_Size=round(Std_Dev_Size, 2)
+| table Min_Size, Max_Size, Range, Avg_Size, Std_Dev_Size
+
+Packet Size Variation group by user
+source="network_data.csv" 
+| stats min(packet_size) as Min_Size, max(packet_size) as Max_Size, avg(packet_size) as Avg_Size, stdev(packet_size) as Std_Dev_Size by User
+| eval Range=Max_Size - Min_Size
+| eval Avg_Size=round(Avg_Size, 2), Std_Dev_Size=round(Std_Dev_Size, 2)
+| sort -Std_Dev_Size
+| table User, Min_Size, Max_Size, Range, Avg_Size, Std_Dev_Size
+
+
+
+source="network_data.csv" host="AMCS-SCL-33" sourcetype="csv" 
+| eval length = len(packet_size)
+| stats min(packet_size) as Min_Size, max(packet_size) as Max_Size, avg(packet_size) as Avg_Size, stdev(packet_size) as Std_Dev_Size, var(packet_size) as Variance_packet_Size, median(packet_size) as Median_packet_size by EventID
+
+
+--------------appu-----------
+
+Class distribution
+source="ds.csv" 
+| stats count by class
+| sort -count
+
+Inbound vs outbound traffic visualization
+source="ds.csv"
+| timechart sum(ifInOctets11) AS Total_Inbound sum(ifOutOctets11) AS Total_Outbound
+
+TCP Performance - retransmission rate [formula is applied]
+source="ds.csv"
+| eval RetransRate = (tcpRetransSegs/tcpOutSegs)*100
+| timechart avg(RetransRate) AS Avg_Retransmission_Percentage
+
+Established Connections Trend - just visualizing active tcp connections
+source="ds.csv"
+| timechart sum(tcpCurrEstab) AS Active_TCP_Connections
+
+Error Analysis - Input vs Output Discards
+source="ds.csv"
+| timechart sum(ifInDiscards11) AS In_Discards sum(ifOutDiscards11) AS Out_Discards
+
+ICMP Analysis- Message Types Distribution
+source="ds.csv"
+| stats sum(icmpInMsgs) AS In_Msgs sum(icmpOutMsgs) AS Out_Msgs sum(icmpInDestUnreachs) AS In_Unreach sum(icmpOutDestUnreachs) AS Out_Unreach
+
+Class trend over time
+source="ds.csv"
+| timechart count by class
+
+Anomalous Flow Trends (e.g., PKT_SIZE for "normal" vs. "malicious" Class)
+[first find avg packetsize by writing logic then visualize it]
+source="ds.csv"
+| eval In_AvgPktSize = ifInOctets11/ifInUcastPkts11, Out_AvgPktSize = ifOutOctets11/ifOutUcastPkts11
+| stats avg(In_AvgPktSize) AS Avg_In_Size avg(Out_AvgPktSize) AS Avg_Out_Size BY class
+
+Network Traffic Volume Analysis
+source="network_data.csv" 
+| chart sum(packet_size) as "Total Bytes" by User
+| sort - "Total Bytes"
+
+Security Analysis
+Query: Identify users with unusual network behavior (connections outside business hours)
+source="network_data.csv" 
+| eval timestamp_epoch=strptime(Timestamp, "%m/%d/%Y %H:%M")
+| eval hour=strftime(timestamp_epoch, "%H")
+| where hour < "08" OR hour > "18"
+| stats count as "After Hours Connections" by User
+| sort - "After Hours Connections"
+
+User Behavior Profiling
+Query: Create user activity profiles
+source="network_data.csv" 
+| stats count as connections, 
+        avg(packet_size) as avg_packet_size,
+        max(packet_size) as max_packet_size,
+        dc(dest_ip) as unique_destinations
+        by User
+| sort - connections
+
+
+Network Utilization
+Query: Peak usage times identification
+source="network_data.csv" 
+| eval timestamp_epoch=strptime(Timestamp, "%m/%d/%Y %H:%M")
+| eval hour=strftime(timestamp_epoch, "%H")
+| sort hour
+| stats sum(packet_size) as "traffic hours" by hour
+
+
+Peak anomalous packets
+source="network_data.csv" 
+| eventstats avg(packet_size) as avg_size, stdev(packet_size) as std_dev
+| eval upper_bound=avg_size + (2*std_dev)
+| eval lower_bound=avg_size - (2*std_dev)
+| where packet_size > upper_bound OR packet_size < lower_bound
+| chart count by User packet_size
+ Heatmap but won’t output as it won’t be installed
+
+
+EventID vs Timestamp for Specific User (As Requested)
+source="network_data.csv" 
+| where User="david"
+| eval timestamp_epoch=strptime(Timestamp, "%m/%d/%Y %H:%M")
+| eval formatted_time=strftime(timestamp_epoch, "%m/%d %H:%M")
+| chart values(EventID) over formatted_time
+| sort formatted_time

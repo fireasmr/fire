@@ -188,3 +188,18 @@ source="network_data.csv"
 | eval formatted_time=strftime(timestamp_epoch, "%m/%d %H:%M")
 | chart values(EventID) over formatted_time
 | sort formatted_time
+----------visualization----------
+
+You need this when: Your question has two parts, like "Find all network events from the top 5 most active users." You first need to find the top users, then find their events.
+Scenario: You want to see the detailed event data, but only for the source IPs that are responsible for the top 3 highest traffic (ifInOctets) events.
+source="all_data (3).csv"
+| eval columns = split(_raw, ",")
+| eval src_ip = mvindex(columns, <index_for_src_ip>)
+| eval ifInOctets = tonumber(mvindex(columns, <index_for_ifInOctets>))
+| where [ search source="all_data (3).csv"
+            | eval columns = split(_raw, ",")
+            | eval src_ip = mvindex(columns, <index_for_src_ip>)
+            | eval ifInOctets = tonumber(mvindex(columns, <index_for_ifInOctets>))
+            | sort 3 -ifInOctets
+            | fields src_ip ]
+| table _time, src_ip, ifInOctets

@@ -530,4 +530,50 @@ Capture VLAN traffic:
 ● vlan
 ● vlan and (host 192.168.0.0 and port 80)
 
-----------------------------------------------------
+---------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
+
+from scapy.all import rdpcap, Raw, TCP, IP
+from collections import defaultdict
+
+def extract_files_from_stream(pcap_file, output_file):
+    packets = rdpcap(pcap_file)
+    sessions = defaultdict(list)
+
+    for pkt in packets:
+        if pkt.haslayer(TCP) and pkt.haslayer(Raw) and pkt.haslayer(IP):
+            src_ip, sport = pkt[IP].src, pkt[TCP].sport
+            dst_ip, dport = pkt[IP].dst, pkt[TCP].dport
+            session_key = tuple(sorted(((src_ip, sport), (dst_ip, dport))))
+            sessions[session_key].append(pkt)
+    
+    start_sig = b'\x50\x4B\x03\x04'
+    end_sig = b'\x50\x4B\x05\x06'
+    file_found = False
+
+    for session_key, session_packets in sessions.items():
+        sorted_packets = sorted(session_packets, key=lambda p: p[TCP].seq)
+        full_payload = b"".join(p[Raw].load for p in sorted_packets)
+                
+        start_index = full_payload.find(start_sig)
+        
+        if start_index != -1:            
+            end_index = full_payload.rfind(end_sig)
+            if end_index != -1 and end_index > start_index:
+                file_data = full_payload[start_index : end_index + 22]
+                try:
+                    with open(output_file, 'wb') as f:
+                        f.write(file_data)
+                    print(f"  [SUCCESS] Saved extracted file to {output_file}")
+                    file_found = True
+                    return
+                except Exception as e:
+                    print(f"  [ERROR] Could not write to file: {e}")
+                    return
+
+    if not file_found:
+        print("\nCould not find a complete DOCX file in any TCP stream.")
+
+extract_files_from_stream(r'/Users/tharageshtharun/Downloads/captures.pcapng', "/Users/tharageshtharun/Downloads/extracted.docx")
+-------------------------------------------------above is tg's -------------- code

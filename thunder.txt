@@ -1,0 +1,427 @@
+------------------multiple doc's extraction---------------------
+
+from scapy.all import rdpcap, Raw, TCP, IP
+
+def extract_docx_multiple(pcap_file, output_dir):
+    packets = rdpcap(pcap_file)
+    data_stream = bytearray()
+
+    start = b'\x50\x4B\x03\x04'
+    end = b'\x50\x4B\x05\x06'
+    docx_count = 0
+
+    for pkt in packets:
+        if pkt.haslayer(IP) and pkt.haslayer(TCP) and pkt.haslayer(Raw):
+            data_stream += pkt[Raw].load
+
+    index = 0
+    while True:
+        start_idx = data_stream.find(start, index)
+        if start_idx == -1:
+            break
+        end_idx = data_stream.find(end, start_idx)
+        if end_idx == -1:
+            break
+        end_idx += 22
+        docx_data = data_stream[start_idx:end_idx]
+        output_file = f"{output_dir}/extracted_{docx_count + 1}.docx"
+        with open(output_file, 'wb') as f:
+            f.write(docx_data)
+        print(f"Saved DOCX {docx_count + 1} to {output_file}")
+        docx_count += 1
+        index = end_idx
+
+    if docx_count == 0:
+        print("No DOCX found in capture.")
+    else:
+        print(f"Total DOCX files extracted: {docx_count}")
+
+extract_docx_multiple(
+    "multidoc.pcapng", "./extracted_docs"
+)
+
+-------------single doc extraction-------------
+from scapy.all import rdpcap, Raw, TCP, IP
+
+def extract_docx(pcap_file, output_file):
+    packets = rdpcap(pcap_file)
+    docx_data = bytearray()
+    found = False
+    sig1 = b'\x50\x4B\x03\x04'
+    sig2 = b'\x50\x4B\x03\x04\x4B\x50'
+
+    for pkt in packets:
+        if pkt.haslayer(IP) and pkt.haslayer(TCP) and pkt.haslayer(Raw):
+            data = pkt[Raw].load
+            if not found:
+                if sig1 in data:
+                    found = True
+                    docx_data += data[data.index(sig1):]
+                    print("Found DOCX start (sig1)")
+                elif sig2 in data:
+                    found = True
+                    docx_data += data[data.index(sig2):]
+                    print("Found DOCX start (sig2)")
+            else:
+                docx_data += data
+
+    if docx_data:
+        with open(output_file, 'wb') as f:
+            f.write(docx_data)
+        print(f"Saved DOCX to {output_file}")
+    else:
+        print("No DOCX found in capture.")
+
+extract_docx(r"Z:\FTP-FILECARVE.pcapng", "extracted1.docx")
+------------wireshark help-----------------
+
+Display filters (easy, use in the filter bar)
+
+All HTTP packets
+http
+
+HTTP requests only
+http.request
+
+HTTP responses only
+http.response
+
+Specific HTTP method (GET/POST/PUT/DELETE, etc.)
+http.request.method == "GET"
+http.request.method == "POST"
+
+Specific status code or range
+http.response.code == 200
+http.response.code >= 400 and http.response.code < 600
+
+Filter by Host header or domain
+http.host == "example.com"
+http.host contains "example"
+
+Filter by request URI or path fragment
+http.request.uri contains "/login"
+http.request.full_uri contains "example.com/path"
+
+Filter by content-type (responses or requests with bodies)
+http.content_type == "application/json"
+http.content_type contains "text/html"
+
+Filter by User-Agent
+http.user_agent contains "Mozilla"
+
+Filter by Cookie or Authorization header
+http.cookie
+http.authorization
+http.authorization contains "Bearer"
+
+Show packets containing file downloads / attachments
+http.content_disposition
+or http.content_type contains "application/octet-stream"
+
+Match with regex (PCRE)
+http.host matches ".*example.*"
+
+http.request.uri matches "/api/v[0-9]+/.*"
+
+Combine conditions (AND / OR / NOT)
+http.request.method == "POST" and http.host == "api.example.com"
+http and not http.request.method == "OPTIONS"
+
+Show POST requests (often with bodies)
+http.request.method == "POST"
+
+Show responses with a specific phrase (reason)
+http.response.phrase contains "Not Found"
+
+Capture HTTP on standard port 80 (all hosts)
+tcp port 80
+
+Capture traffic to/from a specific host on port 80
+host 10.0.0.5 and tcp port 80
+
+Capture only traffic destined to port 80 (server-bound)
+tcp dst port 80
+
+Capture HTTPS (TLS) on port 443
+tcp port 443
+
+Capture either 80 or 443
+tcp port 80 or tcp port 443
+
+Show failed login attempts (POSTs returning 401/403):
+http.request.method == "POST" and (http.response.code == 401 or http.response.code == 403)
+
+Show image responses (jpg/png)
+http.content_type contains "image/"
+
+Find requests to a specific API path and view their responses:
+http.request.uri contains "/api/v1/orders"
+
+Request-focused filters
+
+Show all request URIs:
+http.request.uri
+
+Show requests with query parameters:
+http.request.uri contains "?"
+
+Requests with JSON body:
+http.request.method == "POST" and http.content_type contains "application/json"
+
+Requests with form data (e.g., login forms):
+http.content_type == "application/x-www-form-urlencoded"
+
+Requests with large payload (>1KB):
+http.request and frame.len > 1000
+
+Requests missing Host header:
+http.request and not http.host
+Response-focused filters
+
+Responses larger than 100 KB:
+http.response and frame.len > 100000
+
+Redirects (301, 302, 307, 308):
+http.response.code >= 300 and http.response.code < 400
+
+Server errors:
+http.response.code >= 500
+
+Responses with JSON:
+http.content_type contains "json"
+
+Responses with HTML:
+http.content_type contains "text/html"
+
+Responses with gzip compression:
+http.content_encoding == "gzip"
+
+Header-specific filters
+
+Look at Referrer headers:
+http.referer
+
+Requests with specific referrer:
+http.referer contains "google.com"
+
+Requests with Authorization header (often API calls):
+http.authorization
+
+Requests with Basic authentication:
+http.authorization contains "Basic"
+
+Requests with Bearer tokens:
+http.authorization contains "Bearer"
+
+Requests containing cookies:
+http.cookie
+
+Requests containing session cookies:
+http.cookie contains "session"
+
+Responses setting cookies:
+http.set_cookie
+
+Debugging/troubleshooting filters
+
+Only requests with missing responses:
+http.request and not http.response_in
+
+Only responses without request info:
+http.response and not http.request_in
+
+Show connections where response time is long (>1s):
+http.time > 1
+
+Requests to multiple subdomains:
+http.host matches ".*\.example\.com"
+
+Requests where User-Agent indicates mobile:
+http.user_agent contains "Mobile"
+
+HTTP/2 traffic:
+http2
+
+TLS handshake failures:
+tls.alert_message
+
+Certificates exchanged:
+tls.handshake.certificate
+
+→ Find failing API calls
+
+http and frame.len > 2000 and http.content_type contains "json"
+→ Large JSON API responses
+
+http.request and http.user_agent contains "curl"
+
+----------y------finish-----
+
+------------v--- start----------
+
+== equals  
+!= not equals  
+> , < , >= , <= numeric comparisons  
+contains payload/substring check (case-sensitive)  
+matches regex (PCRE)    
+&& logical AND  
+|| logical OR  
+! logical NOT (prefix)  
+() grouping  
+
+frame.number == 123 — specific frame  
+frame.len > 1500 — frames bigger than MTU  
+frame.time_delta — inter-frame time (useful for timing analysis)  
+frame contains "password" — raw frame contains string  
+
+eth.src == 00:11:22:33:44:55 — source MAC  
+eth.dst == ff:ff:ff:ff:ff:ff — broadcast  
+vlan.id == 100 — VLAN tag  
+
+ip.addr == 192.168.1.5 — source or destination IP  
+ip.src == 10.0.0.1 — source IP  
+ip.dst == 10.0.0.2 — destination IP  
+ip.proto == 6 — protocol number (6 = TCP)  
+ip.ttl <= 5 — TTL based filter  
+ipv6.addr == 2001:db8::1 — IPv6 address  
+ipv6.nxt == 6 — IPv6 next header  
+
+tcp.port == 443 — any TCP port 443 traffic  
+udp.port == 53 — any UDP port 53 traffic  
+tcp.srcport == 22 — TCP source port 22  
+udp.dstport == 500 — UDP destination port 500  
+tcp.flags.syn == 1 — SYN flag set  
+tcp.flags.ack == 1 — ACK flag set  
+tcp.flags.reset == 1 — RST flag set  
+tcp.flags.fin == 1 — FIN flag set  
+tcp.flags.syn == 1 && tcp.flags.ack == 0 — SYN only (new connection)  
+tcp.seq — TCP sequence number  
+tcp.ack — TCP acknowledgment number  
+
+http — any HTTP traffic  
+http.request — HTTP request  
+http.response — HTTP response  
+http.request.method == "GET" — HTTP GET request  
+http.request.method == "POST" — HTTP POST request  
+http.response.code == 200 — HTTP 200 OK  
+http.response.code == 404 — HTTP 404 Not Found  
+http.host == "example.com" — HTTP Host header  
+http.user_agent contains "Firefox" — HTTP User-Agent header  
+http.request.uri contains "/login" — HTTP URI  
+
+dns — any DNS traffic  
+dns.qry.name == "example.com" — DNS query name  
+dns.flags.response == 0 — DNS queries only  
+dns.flags.response == 1 — DNS responses only  
+dns.qry.type == 1 — A record query  
+
+tls — TLS traffic  
+tls.handshake.type == 1 — TLS ClientHello  
+tls.handshake.type == 2 — TLS ServerHello  
+tls.record.version == 0x0303 — TLS 1.2  
+
+arp — ARP traffic  
+arp.opcode == 1 — ARP request  
+arp.opcode == 2 — ARP reply  
+
+icmp — ICMP traffic  
+icmp.type == 8 — echo request (ping request)  
+icmp.type == 0 — echo reply (ping reply)  
+
+frame.len > 1400 — large frames  
+tcp.analysis.retransmission — TCP retransmissions  
+tcp.analysis.fast_retransmission — fast retransmissions  
+tcp.analysis.flags — TCP analysis flags  
+tcp.stream == 5 — specific TCP stream  
+
+!(eth.dst == ff:ff:ff:ff:ff:ff) — exclude broadcast  
+!(arp || icmp) — exclude ARP and ICMP  
+!(arp || icmp || bootp || dhcp) — exclude ARP, ICMP, DHCP
+
+---regex part----------
+1.	Dot (.) any char
+
+http.host matches "a.c"
+
+
+	2.	Asterisk (*) zero or more
+
+http.request.uri matches "a*"
+
+
+	3.	Plus (+) one or more
+
+http.user_agent matches "Mozilla+"
+
+
+	4.	Question mark (?) optional
+
+http.request.uri matches "colou?r"
+
+
+	5.	Brackets [ ] set
+
+http.host matches "[abc]"
+
+
+	6.	Negated set [^ ] not in set
+
+http.host matches "[^abc]"
+
+
+	7.	Caret (^) start of string
+
+http.request.uri matches "^/api"
+
+
+	8.	Dollar ($) end of string
+
+http.host matches ".com$"
+
+
+	9.	OR (|)
+
+http.request.uri matches "login|signup"
+
+
+	10.	Grouping ( )
+
+http.request.uri matches "(login|signup)"
+
+	11.	Escape (\)
+
+http.host matches "example\\.com"
+
+	12.	Case-insensitive (?i)
+
+http.request.uri matches "(?i)login"
+
+
+
+
+http.request.uri matches "^/api/v1/.*\\.json$"
+
+
+	•	Query params with token/key:
+
+http.request.uri matches "(token|key)="
+
+
+	•	Auth header with Bearer (case-insensitive):
+
+http.authorization matches "(?i)Bearer"
+
+
+	•	Hosts ending with .gov or .edu:
+
+http.host matches "\\.(gov|edu)$"
+------------hex codes - header/footer -----------------
+
+JPEG -  FF D8 FF E0
+JPEG FOOTER - FF D9
+PNG - 89 50 4E 47 0D 0A 1A 0A
+DOCX - 50 4B 03 04
+PDF - 25 50 44 46
+DOC - D0 CF 11 E0 A1 B1 1A E1
+
+------------------------------------------------------------

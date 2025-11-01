@@ -1,4 +1,4 @@
-# ------------------------------------------------------------------------------
+# ---------------------------------------y---------------------------------------
 import pandas as pd
 
 df = pd.read_csv("/content/server_logs.csv")
@@ -17,7 +17,51 @@ freq_table = freq_table.sort_index()
 
 print("User Event Type Distribution (%):")
 print(freq_table.round(2))
+# -------------------------------------s FAT----------------------------------------
+import pandas as pd
+import numpy as np
 
+data = pd.read_csv(r"C:\Users\barat\Downloads\network_telemetry.csv", parse_dates=["timestamp"])
+
+numerical_cols = ['bytes_in', 'bytes_out', 'packets', 'flow_duration', 'src_port', 'dst_port', 'vlan']
+categorical_cols = ['src_ip', 'dst_ip', 'protocol', 'flags', 'interface', 'device_id', 'region', 'label']
+
+for col in numerical_cols:
+    data[col] = pd.to_numeric(data[col], errors="coerce")
+
+def categorical_frequency(df, cols, top_n=10):
+    freq_tables = {}
+    total = len(df)
+    for col in cols:
+        vc = df[col].value_counts(dropna=False)
+        freq = pd.DataFrame({
+            col: vc.index.astype(str),
+            "count": vc.values
+        })
+        freq["percent"] = (freq["count"] / total * 100).round(2)
+        freq_tables[col] = freq.head(top_n)
+
+        print(f"\n📊 Top {top_n} values for '{col}':")
+        print(freq.head(top_n).to_string(index=False))
+    return freq_tables
+
+
+def numerical_frequency(df, cols, bins=10):
+    freq_tables = {}
+    for col in cols:
+        if df[col].dropna().empty:
+            continue
+        freq = pd.cut(df[col], bins=bins).value_counts().sort_index().reset_index()
+        freq.columns = [f"{col}_range", "count"]
+        freq["percent"] = (freq["count"] / len(df) * 100).round(2)
+        freq_tables[col] = freq
+
+        print(f"\n📈 Frequency distribution for '{col}':")
+        print(freq.to_string(index=False))
+    return freq_tables
+
+categorical_freq = categorical_frequency(data, categorical_cols)
+numerical_freq = numerical_frequency(data, numerical_cols)
 # ------------------------------------------------------------------------------
 
 network data baselining

@@ -1257,3 +1257,120 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# -------------------------------------------------------------------------
+
+Frequency Table Analysis in Splunk
+
+Goal: Find which users or processes are most active — what they do most often.
+
+📊 A. Frequency of Events per User
+index=sysmon
+| stats count by User EventType
+| sort - count
+
+
+➡️ Shows how many times each user triggered each event type (e.g., Logon, Logout, ProcessCreate).
+
+📊 B. Frequency of Process Executions
+index=sysmon EventType="ProcessCreate"
+| stats count by Image CommandLine User
+| sort - count
+
+
+➡️ Gives you top processes (e.g., chrome.exe, powershell.exe, cmd.exe) per user.
+
+📊 C. Frequency of Network Connections
+
+(if your dataset includes SourceIp/DestinationIp)
+
+index=sysmon EventType="NetworkConnect"
+| stats count by SourceIp DestinationIp User
+| sort - count
+
+📊 D. Time-Bucketed Activity (User vs. Time)
+index=sysmon
+| bin _time span=1h
+| stats count by _time User
+| timechart span=1h sum(count) as total_events by User
+
+
+➡️ Visualize normal user activity patterns over time — helps identify “burst” behavior.
+
+⚙️ 2️⃣ Baselining for User Behaviour
+
+Now let’s establish a baseline for each user’s normal behavior — and find deviations.
+
+📈 A. Baseline for Event Frequency
+
+This measures how often each user performs events and detects spikes.
+
+index=sysmon
+| stats count by _time User
+| eventstats avg(count) as avg_events stdev(count) as stdev_events by User
+| eval upper_threshold = avg_events + (2 * stdev_events)
+| eval anomaly = if(count > upper_threshold, "YES", "NO")
+| where anomaly="YES"
+| table _time User count avg_events stdev_events upper_threshold anomaly
+
+
+➡️ Detects when a user’s activity suddenly spikes — e.g., a background service spawning unusual processes.
+
+📈 B. Baseline by Process Type
+
+This looks for unusual process executions by the same user.
+
+index=sysmon EventType="ProcessCreate"
+| stats count by User Image
+| eventstats avg(count) as avg_count stdev(count) as stdev_count by User
+| eval upper_threshold = avg_count + (2 * stdev_count)
+| eval anomaly = if(count > upper_threshold, "YES", "NO")
+| where anomaly="YES"
+| table User Image count avg_count stdev_count upper_threshold anomaly
+
+
+➡️ Detects when a user suddenly starts many new processes (possible compromise).
+
+📈 C. Baseline by Login/Logout Patterns
+index=sysmon (EventType="Logon" OR EventType="Logout")
+| timechart span=1h count by User
+| eventstats avg(*) as avg_logins stdev(*) as stdev_logins
+| eval threshold = avg_logins + (2 * stdev_logins)
+
+
+➡️ Detects users logging in/out much more frequently than normal.
+
+🧠 Example Interpretation:
+
+If User=c6279 normally has 3–5 process creation events/hour but suddenly spikes to 40 → anomaly.
+
+If a service account starts spawning browsers (firefox.exe, powershell.exe), that’s an outlier from its baseline process profile.
+
+✅ Putting It Together: Combined Query
+
+Here’s one you can use to see per-user anomalies across all event types:
+
+index=sysmon
+| stats count by _time User EventType
+| eventstats avg(count) as avg_events stdev(count) as stdev_events by User
+| eval upper_threshold = avg_events + (2 * stdev_events)
+| eval anomaly = if(count > upper_threshold, "YES", "NO")
+| where anomaly="YES"
+| table _time User EventType count avg_events stdev_events upper_threshold anomaly
+
+🧾 Optional – Create a Frequency Table Summary
+
+Store it as a lookup to compare future logs:
+
+index=sysmon earliest=-7d latest=now()
+| stats count, dc(Image) as unique_processes, dc(SourceIp) as unique_ips by User
+| outputlookup sysmon_baseline.csv
+
+
+Then use it later:
+
+index=sysmon
+| lookup sysmon_baseline.csv User OUTPUT count as baseline_count
+| eval deviation = count - baseline_count
+| where deviation > 10
